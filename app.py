@@ -33,6 +33,31 @@ def get_gemini_client():
     return genai.Client(api_key=api_key)
 
 
+def get_token_usage(response):
+    """Extract available token counts from the Gemini response."""
+    usage = getattr(response, "usage_metadata", None)
+
+    if usage is None:
+        return {}
+
+    usage_details = {}
+
+    input_tokens = getattr(usage, "prompt_token_count", None)
+    output_tokens = getattr(usage, "candidates_token_count", None)
+    total_tokens = getattr(usage, "total_token_count", None)
+
+    if input_tokens is not None:
+        usage_details["input"] = input_tokens
+
+    if output_tokens is not None:
+        usage_details["output"] = output_tokens
+
+    if total_tokens is not None:
+        usage_details["total"] = total_tokens
+
+    return usage_details
+
+
 @app.get("/health")
 def health():
     """Return application health and version."""
@@ -44,7 +69,8 @@ def health():
 
 @app.post("/chat")
 def chat():
-    """Validate input, call Gemini, and capture a Langfuse trace."""
+    """Call Gemini and capture the generation in Langfuse."""
+
     body = request.get_json(silent=True)
     message = body.get("message") if isinstance(body, dict) else None
 
@@ -82,34 +108,45 @@ def chat():
                 context = "No external documents were retrieved."
                 span.update(output=context)
 
+            # Build the exact prompt that will be sent to Gemini.
+            prompt = (
+                "Answer clearly and briefly.\n"
+                f"Context: {context}\n"
+                f"Question: {valid_message}"
+            )
+
+            model_name = os.getenv(
+                "GEMINI_MODEL",
+                "gemini-3.5-flash-lite",
+            )
+
+            client = get_gemini_client()
+
+            # Langfuse records generation input, output and duration.
             with langfuse.start_as_current_observation(
                 as_type="generation",
                 name="gemini-generation",
-                model=os.getenv(
-                    "GEMINI_MODEL", "gemini-flash-latest"
-                ),
-                input=valid_message,
+                model=model_name,
+                input=prompt,
             ) as generation:
 
-                # Used later in Demo 2 to create a slow span.
-                if os.getenv("DEMO_SLOW_REQUEST") == "true":
-                    import time
-                    time.sleep(2)
-
-                client = get_gemini_client()
                 response = client.models.generate_content(
-                    model=os.getenv(
-                        "GEMINI_MODEL", "gemini-flash-latest"
-                    ),
-                    contents=(
-                        "Answer clearly and briefly.\n"
-                        f"Context: {context}\n"
-                        f"Question: {valid_message}"
-                    ),
+                    model=model_name,
+                    contents=prompt,
                 )
 
                 reply = response.text or "The model returned no text."
+
+                # Record the completion.
                 generation.update(output=reply)
+
+                # Record token usage when Gemini provides it.
+                usage_details = get_token_usage(response)
+
+                if usage_details:
+                    generation.update(
+                        usage_details=usage_details
+                    )
 
             with langfuse.start_as_current_observation(
                 as_type="span",
@@ -120,12 +157,15 @@ def chat():
 
             trace.update(output=result)
 
+        # Send pending observations to Langfuse before responding.
         langfuse.flush()
+
         return jsonify(result)
 
     except Exception:
         app.logger.exception("Chat request failed")
         langfuse.flush()
+
         return jsonify(
             error="The request could not be completed."
         ), 502

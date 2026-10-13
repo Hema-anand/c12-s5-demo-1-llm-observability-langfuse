@@ -1,10 +1,14 @@
-# Demo 1: LLM Observability with Langfuse
+# Sprint 5: LLM Observability with Langfuse
+
+# Demo 1: Instrument an LLM-Calling Agent with Langfuse
 
 ## Overview
 
 In this demo, you will integrate Google Gemini with a Flask application and use Langfuse to observe how an LLM request is processed.
 
-You will instrument the application with named spans, generate traces, and inspect the execution flow in Langfuse. The application uses a simulated retrieval stage to demonstrate trace analysis without requiring a vector database.
+You will instrument the application with named observations, generate traces, and inspect the execution flow in Langfuse. The application uses a simulated retrieval stage to demonstrate trace analysis without requiring a vector database.
+
+The Gemini generation observation records the complete prompt sent to the model, the model's response, and available token-usage metadata. Langfuse records generation timing automatically. Cost visibility depends on whether Langfuse can calculate cost for the selected model.
 
 ## Learning Outcomes
 
@@ -12,8 +16,9 @@ By completing this demo, you will be able to:
 
 - Integrate a Gemini model into a Python application.
 - Instrument an LLM application using Langfuse.
-- Capture traces with named spans for individual processing stages.
+- Capture traces with named observations for individual processing stages.
 - Inspect LLM inputs, outputs, and execution flow in Langfuse.
+- Inspect token usage and verify whether cost information is available.
 
 ## Application Flow
 
@@ -21,7 +26,7 @@ A request to the `/chat` endpoint passes through the following stages:
 
 1. **Validate Input:** Check whether the user message is valid.
 2. **Retrieve Context:** Simulate a retrieval stage.
-3. **Generate Response:** Send the message and context to Gemini.
+3. **Generate Response:** Send the prompt and simulated context to Gemini.
 4. **Format Response:** Prepare the response returned to the client.
 
 Langfuse records the request trace and its associated observations, allowing you to inspect the processing stages.
@@ -59,17 +64,16 @@ Open `.env` and provide your credentials:
 
 ```dotenv
 GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-flash-latest
+GEMINI_MODEL=gemini-3.5-flash-lite
 
 LANGFUSE_PUBLIC_KEY=your-langfuse-public-key
 LANGFUSE_SECRET_KEY=your-langfuse-secret-key
 LANGFUSE_BASE_URL=https://cloud.langfuse.com
 
 APP_VERSION=local
-DEMO_SLOW_REQUEST=false
 ```
 
-Replace the placeholder values with your actual credentials. Use the Langfuse base URL appropriate for your project region if it differs from the example.
+Replace the placeholder values with your actual credentials. Use the Langfuse base URL appropriate for your project region if it differs from the example. The model name must be a model supported by your Gemini API account.
 
 **Security:** Never commit your `.env` file or share your API keys.
 
@@ -95,11 +99,11 @@ Execute the test suite:
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Verify that all tests pass. The tests use mocked Gemini responses, so they do not need to make actual LLM API calls.
+Verify that all tests pass. The tests should use mocked Gemini responses so they do not need to make actual LLM API calls.
 
 ## Step 4: Start the Application
 
-Start the Flask application using Waitress:
+Start the application using Waitress:
 
 ```bash
 .venv/bin/python app.py
@@ -138,7 +142,7 @@ curl -sS -X POST http://localhost:8080/chat \
   -d '{"message":"Explain LLM observability in one sentence"}'
 ```
 
-The application sends the message to Gemini and returns a generated response.
+The application builds a prompt containing instructions, simulated context, and the user's question. It sends that complete prompt to Gemini and returns the generated response.
 
 Example response:
 
@@ -156,17 +160,31 @@ The actual response will vary depending on the model output.
 2. Open the traces view.
 3. Locate the trace corresponding to your chat request.
 4. Open the trace and inspect its observations.
-5. Verify that the following stages appear:
-
+5. Verify that the following observations appear:
    - `chat-request`
    - `validate-input`
    - `retrieve-context`
    - `gemini-generation`
    - `format-response`
-
-6. Open the `gemini-generation` observation and inspect the model input, output, and timing information.
+6. Open `gemini-generation` and inspect the model input, output, timing, and token-usage details when available.
+7. Check whether Langfuse displays cost for the generation.
 
 The trace helps you understand how a single request moves through the application and which stages contribute to its execution time.
+
+## What to Verify for LO1
+
+LO1: **Instrument an LLM-calling agent with Langfuse so every call is captured as a trace (prompt, completion, latency, tokens, cost).**
+
+| Requirement | What to verify in Langfuse |
+|---|---|
+| Trace the LLM call | The `gemini-generation` observation appears under the request trace. |
+| Prompt | The input contains the complete prompt actually sent to Gemini. |
+| Completion | The output contains Gemini's returned text. |
+| Latency | The generation observation shows its duration. |
+| Token usage | Input, output, and total token counts appear when Gemini returns usage metadata and the SDK records it successfully. |
+| Cost | Cost is displayed if Langfuse has the required usage data and model-pricing information. |
+
+Token usage and cost are not the same. If usage is missing, check the Gemini response's usage metadata and the installed SDK versions. If cost is missing, check the selected model's pricing configuration and Langfuse's support for that model. Do not report cost as captured unless it is visible or otherwise explicitly recorded.
 
 ## Expected Result
 
@@ -175,14 +193,16 @@ By the end of this demo, you should have:
 - A working Flask application that calls Gemini.
 - Unit tests that pass without requiring real Gemini requests.
 - Langfuse traces containing named observations.
-- Visibility into the LLM generation stage and the overall request flow.
+- Visibility into the complete prompt, model output, generation timing, and available token-usage information.
+- Verified whether cost information is available for the configured model.
 
 ## Important Notes
 
 - The retrieval stage is simulated; this demo does not connect to a vector database.
-- `DEMO_SLOW_REQUEST` is included for the next demo. Setting it to `true` introduces a controlled delay in the generation stage.
+- The application currently makes one Gemini generation call per valid `/chat` request. Each such call is instrumented as a Langfuse generation observation.
 - Trace inputs and outputs may contain sensitive information. Use test data and avoid submitting personal or confidential information.
-- Token usage and cost reporting depend on the availability of Gemini usage metadata and correct model pricing configuration in Langfuse.
+- Token usage depends on the usage metadata returned by Gemini. Cost reporting depends on model pricing and the usage information available to Langfuse.
+- The example `.env` model name must match a model supported by your Gemini API account.
 
 ## Cleanup
 
