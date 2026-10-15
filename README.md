@@ -1,4 +1,4 @@
-# Sprint 5: LLM Observability with Langfuse
+# Sprint 5: Instrument LLM Observability with Langfuse
 
 # Demo 1: Instrument an LLM-Calling Agent with Langfuse
 
